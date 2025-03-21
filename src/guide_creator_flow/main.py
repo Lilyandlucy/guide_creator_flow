@@ -1,16 +1,22 @@
 #!/usr/bin/env python
 import json
+import os
 from typing import List, Dict
 from pydantic import BaseModel, Field
 from crewai import LLM
 from crewai.flow.flow import Flow, listen, start
 from guide_creator_flow.crews.content_crew.content_crew import ContentCrew
 from openai import OpenAI
+from dotenv import load_dotenv
+
+load_dotenv()
+
 
 # Define our models for structured data
 class Section(BaseModel):
     title: str = Field(description="Title of the section")
     description: str = Field(description="Brief description of what the section should cover")
+
 
 class GuideOutline(BaseModel):
     title: str = Field(description="Title of the guide")
@@ -19,12 +25,14 @@ class GuideOutline(BaseModel):
     sections: List[Section] = Field(description="List of sections in the guide")
     conclusion: str = Field(description="Conclusion or summary of the guide")
 
+
 # Define our flow state
 class GuideCreatorState(BaseModel):
     topic: str = ""
     audience_level: str = ""
     guide_outline: GuideOutline = None
     sections_content: Dict[str, str] = {}
+
 
 class GuideCreatorFlow(Flow[GuideCreatorState]):
     """Flow for creating a comprehensive guide on any topic"""
@@ -54,11 +62,11 @@ class GuideCreatorFlow(Flow[GuideCreatorState]):
         print("Creating guide outline...")
 
         # Initialize the LLM
-        llm = LLM(model="gemini/gemini-2.0-flash-exp", response_format=GuideOutline)
+        # llm = LLM(model="gemini/gemini-2.0-flash-exp", response_format=GuideOutline)
         # llm = LLM(model="deepseek/deepseek-chat", response_format={'type': 'json_object'})
 
         # Create the messages for the outline
-        messages = [
+        messages2 = [
             {"role": "system", "content": "You are a helpful assistant designed to output JSON."},
             {"role": "user", "content": f"""
             Create a detailed outline for a comprehensive guide on "{state.topic}" for {state.audience_level} level learners.
@@ -74,12 +82,36 @@ class GuideCreatorFlow(Flow[GuideCreatorState]):
         ]
 
         # Make the LLM call with JSON response format
-        response = llm.call(messages=messages)        
+        # response = llm.call(messages=messages)        
+
+        client = OpenAI(api_key=os.getenv("DEEPSEEK_API_KEY"), base_url=os.getenv("DEEP_SEEK_URL"))
+
+        response = client.chat.completions.create(
+            model="deepseek-chat",
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant designed to output JSON."},
+                {"role": "user", "content": f"""
+                Create a detailed outline for a comprehensive guide on "{state.topic}" for {state.audience_level} level learners.
+
+                The outline should include:
+                1. A compelling title for the guide
+                2. An introduction to the topic
+                3. 8-10 main sections that cover the most important aspects of the topic
+                4. A conclusion or summary
+
+                For each section, provide a clear title and a brief description of what it should cover.
+                EXAMPLE JSON OUTPUT：{{"conclusion": "<conclusion>","introduction": "<introduction>","sections": [{{"description": "<description>","title": "<title>"}}],"target_audience": "<target_audience>","title": "<title>"}}
+                """}],
+            response_format={
+                'type': 'json_object'
+            }
+            # stream=False
+        )
 
         # print(f"response:{response.choices[0].message.content}")
         # Parse the JSON response
-        # outline_dict = json.loads(response.choices[0].message.content)
-        outline_dict = json.loads(response)
+        outline_dict = json.loads(response.choices[0].message.content)
+        # outline_dict = json.loads(response)
         self.state.guide_outline = GuideOutline(**outline_dict)
 
         # Save the outline to a file
@@ -140,7 +172,7 @@ class GuideCreatorFlow(Flow[GuideCreatorState]):
             f.write(guide_content)
 
         print("\nComplete guide compiled and saved to output/complete_guide.md")
-        return "Guide creation completed successfully"    
+        return "Guide creation completed successfully"
 
 
 def kickoff():
@@ -150,11 +182,13 @@ def kickoff():
     print("Your comprehensive guide is ready in the output directory.")
     print("Open output/complete_guide.md to view it.")
 
+
 def plot():
     """Generate a visualization of the flow"""
     flow = GuideCreatorFlow()
     flow.plot("guide_creator_flow")
     print("Flow visualization saved to guide_creator_flow.html")
+
 
 if __name__ == "__main__":
     kickoff()
